@@ -1,123 +1,201 @@
-# %% Ouverture des données
+import os
 import numpy as np
-import matplotlib.pyplot as plt 
-from fonction import GaussianClassifier
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import ConfusionMatrixDisplay
+from fonction import GaussianClassifier, KNN, ParzenClassifier, Perceptron, Bagging, cross_validation, plot_visualisation, accuracy
 
-#%% Ouverture des données
-data = np.loadtxt("Data/data_tp3_app.txt")
+os.makedirs("images", exist_ok=True)
 
-# Séparation des X et des labels
-labels = data[:, 0]        # Les classes (colonne 0)
-X = data[:, 1:3]           # Les caractéristiques (colonnes 1 et 2)
+# Data 
+datasets = {}
+for tp in [1, 2, 3]:
+    app = np.loadtxt(f"Data/data_tp{tp}_app.txt")
+    pred = np.loadtxt(f"Data/data_tp{tp}_dec.txt")
+    datasets[tp] = {
+        'X_train': app[:, 1:3], 'y_train': app[:, 0],
+        'X_test': pred[:, 1:3], 'y_test': pred[:, 0]
+    }
 
-# %% Estimation gaussienne 
-# Distance Euclidien
-model_eucl = GaussianClassifier(metric="euclidienne")
-model_eucl.train(X, labels)
 
-# Distance Mahalanobis
-model_mahal = GaussianClassifier(metric="mahalanobis")
-model_mahal.train(X, labels)
+for tp, data in datasets.items():
+    print(f"\n{'='*50}\nTRAITEMENT DU TP{tp}\n{'='*50}")
+    X_tr, y_tr = data['X_train'], data['y_train']
+    X_te, y_te = data['X_test'], data['y_test']
 
-# %%% Prédiction sur de NOUVEAUX POINTS
-# Points a prédire 
-points_aleatoires = np.array([
-    [4.0, 3.0], 
-    [5.0, 3.0],
-    [1.0, -2.0] 
-])
-
-# Obtenir les prédictions 
-pred_eucl = model_eucl.predict(points_aleatoires)
-pred_mahal = model_mahal.predict(points_aleatoires)
-print(f"Prédictions Euclidienne : {pred_eucl}")
-print(f"Prédictions Mahalanobis : {pred_mahal}")
-
-# CORRECTION : Pour tester les distances brutes sur plusieurs points, on fait une petite compréhension de liste
-dist_eucl_1 = [model_eucl.distance(pt, c=1.0) for pt in points_aleatoires]
-dist_mahal_1 = [model_mahal.distance(pt, c=1.0) for pt in points_aleatoires]
-
-print("\nDistances vers la classe 1 :")
-for i, pt in enumerate(points_aleatoires):
-    print(f"Point {pt} -> Eucl: {dist_eucl_1[i]:.4f} | Mahal: {dist_mahal_1[i]:.4f}")
-
-# %%  Visualisation
-
-def plot_visualisation(model, X_train, labels_train, X_new, frontiere=True):
-    """
-    Affiche les données d'entraînement, les barycentres et les nouveaux points
-    """
-    # thème  global
-    plt.style.use('ggplot') 
+    # --- 0. ANALYSES DESCRIPTIVES ---
+    print(f"\n--- STATISTIQUES DESCRIPTIVES TP{tp} ---")
+    plt.figure(figsize=(8, 6))
     
-    plt.figure(figsize=(10, 7))
-    
-    # Palette de couleurs harmonieuse (tab10)
-    cmap = plt.get_cmap('tab10')
-    
-    # Frontière de décision
-    if frontiere:
-        x_min, x_max = plt.xlim() if plt.xlim() != (0.0, 1.0) else (X_train[:, 0].min() - 1, X_train[:, 0].max() + 1)
-        y_min, y_max = plt.ylim() if plt.ylim() != (0.0, 1.0) else (X_train[:, 1].min() - 1, X_train[:, 1].max() + 1)
+    for c in np.unique(y_tr):
+        X_c = X_tr[y_tr == c]
+        print(f"Classe {int(c)} -> Effectif: {len(X_c)}, Variances: [{np.var(X_c[:,0])}, {np.var(X_c[:,1])}]")
         
-        xx, yy = np.meshgrid(np.linspace(x_min, x_max, 300),
-                             np.linspace(y_min, y_max, 300))
-        
-        grille_points = np.c_[xx.ravel(), yy.ravel()]
-        Z = model.predict(grille_points)
-        Z = Z.reshape(xx.shape)
-        
-        # Colorie les zones d'influence avec transparence 
-        plt.contourf(xx, yy, Z, alpha=0.1, cmap='tab10')
-        # Ligne de séparation
-        plt.contour(xx, yy, Z, colors='black', linewidths=1.5, alpha=0.9)
+        # Trace les points et les ellipses 
+        sns.scatterplot(x=X_c[:, 0], y=X_c[:, 1], label=f'Classe {int(c)}', alpha=0.7)
+        sns.kdeplot(x=X_c[:, 0], y=X_c[:, 1], levels=2, alpha=0.5, linewidths=2)
 
-    # Données d'entraînement et barycentres 
-    for i, c in enumerate(model.classes):
-        X_c = X_train[labels_train == c]
-        couleur_classe = cmap(i) # On associe la couleur i à la classe c
-        
-        # Points d'entraînement
-        plt.scatter(X_c[:, 0], X_c[:, 1], 
-                    color=couleur_classe,
-                    colors='black', linewidths=1.5,
-                    alpha=0.7, linewidth=0.5, 
-                    s=60, label=f'Classe {int(c)}')
-        
-        # Barycentres 
-        barycentre = model.barycentres[c]
-        plt.scatter(barycentre[0], barycentre[1], 
-                    color=couleur_classe, s=400, linewidth=0.5, 
-                    zorder=5, label=f'Barycentre {int(c)}')
+    plt.title(f"TP{tp} - Visualisation des données et densités")
+    plt.savefig(f"images/tp{tp}_descriptive.png")
+    plt.close()
 
-    # Points inconnus
-    if X_new.any(): 
-        plt.scatter(X_new[:, 0], X_new[:, 1], 
-                    c='black', marker='X', s=200, 
-                    zorder=6, label='Nouveaux Points')
-    
-        # Petit badge esthétique pour le texte des nouveaux points
-        for i, txt in enumerate(range(1, len(X_new) + 1)):
-            plt.annotate(f" P{txt}", (X_new[i, 0] + 0.1, X_new[i, 1] + 0.1), 
-                         fontsize=12, fontweight='bold', color='black',
-                         bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="black", alpha=0.7))
-    
-    # Finitions
-    plt.title(f"Classification par distance - Métrique : {model.metric.capitalize()}", 
-              fontsize=16, fontweight='bold', pad=20)
-    
-    plt.xlabel('Caractéristique 1', fontsize=12, fontweight='bold')
-    plt.ylabel('Caractéristique 2', fontsize=12, fontweight='bold')
-    
-    # Légende stylisée à l'extérieur
-    legend = plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', frameon=True, shadow=True, fontsize=11)
-    legend.get_frame().set_facecolor('white')
-    
-    plt.tight_layout()
-    plt.show()
-    
-# Affichage pour le modèle avec distance Euclidienne
-plot_visualisation(model_eucl, X_train=X, labels_train=labels, X_new=points_aleatoires)
 
-# Et tu peux même le faire facilement pour le modèle Mahalanobis !
-plot_visualisation(model_mahal, X_train=X, labels_train=labels, X_new=points_aleatoires)
+    # --- 1. ESTIMATION GAUSSIENNES ---
+    print("\n--- ESTIMATION GAUSSIENNES ---")
+
+    gauss_eucl = GaussianClassifier(metric="euclidienne")
+    gauss_eucl.train(X_tr, y_tr)
+    pred_eucl = gauss_eucl.predict(X_te)
+    print(f'Accuracy Gaussien Euclidien : {accuracy(y_te, pred_eucl)}')
+    ConfusionMatrixDisplay.from_predictions(y_te, pred_eucl, cmap="Blues")
+    plt.title(f"TP{tp} - Gaussien Euclidien")
+    plt.savefig(f"images/tp{tp}_gauss_eucl_cm.png")
+    plt.close()
+    plot_visualisation(gauss_eucl, X_tr, y_tr, title=f"images/tp{tp}_gauss_eucl_frontiere")
+    
+    gauss_mahal = GaussianClassifier(metric="mahalanobis")
+    gauss_mahal.train(X_tr, y_tr)
+    pred_mahal = gauss_mahal.predict(X_te)
+    print(f'Accuracy Gaussien Mahalanobis : {accuracy(y_te, pred_mahal)}')
+    ConfusionMatrixDisplay.from_predictions(y_te, pred_mahal, cmap="Blues")
+    plt.title(f"TP{tp} - Gaussien Mahalanobis")
+    plt.savefig(f"images/tp{tp}_gauss_mahal_cm.png")
+    plt.close()
+    plot_visualisation(gauss_mahal, X_tr, y_tr, title=f"images/tp{tp}_gauss_mahal_frontiere")
+    
+    gauss_logv = GaussianClassifier(metric="log-vraisemblance")
+    gauss_logv.train(X_tr, y_tr)
+    pred_logv = gauss_logv.predict(X_te)
+    print(f'Accuracy Gaussien Log-Vraisemblance : {accuracy(y_te, pred_logv)}')
+    ConfusionMatrixDisplay.from_predictions(y_te, pred_logv, cmap="Blues")
+    plt.title(f"TP{tp} - Gaussien Log-Vraisemblance")
+    plt.savefig(f"images/tp{tp}_gauss_logv_cm.png")
+    plt.close()
+    plot_visualisation(gauss_logv, X_tr, y_tr, title=f"images/tp{tp}_gauss_logv_frontiere")
+
+
+    # --- 2. K PLUS PROCHES VOISINS ---
+    print("\n--- ESTIMATION KNN ---")
+
+    knn1 = KNN(k=1)
+    knn1.train(X_tr, y_tr)
+    pred_knn1 = knn1.predict(X_te)
+    print(f'Accuracy 1-PPV : {accuracy(y_te, pred_knn1)}')
+    ConfusionMatrixDisplay.from_predictions(y_te, pred_knn1, cmap="Blues")
+    plt.title(f"TP{tp} - 1-PPV")
+    plt.savefig(f"images/tp{tp}_1ppv_cm.png")
+    plt.close()
+    #plot_visualisation(knn1, X_tr, y_tr, title=f"images/tp{tp}_1ppv_frontiere")
+    
+    best_k, best_acc = 1, 0
+    for k in [1, 3, 5, 7, 9, 11]:
+        _, acc = cross_validation(KNN, X_tr, y_tr, n_folds=5, k=k)
+        if acc > best_acc:
+            best_acc, best_k = acc, k
+            
+    knn_best = KNN(k=best_k)
+    knn_best.train(X_tr, y_tr)
+    
+    pred_knn_maj = knn_best.predict(X_te, choice="majority")
+    print(f'Accuracy {best_k}-PPV Majorité : {accuracy(y_te, pred_knn_maj)}')
+    ConfusionMatrixDisplay.from_predictions(y_te, pred_knn_maj, cmap="Blues")
+    plt.title(f"TP{tp} - {best_k}-PPV Majorite")
+    plt.savefig(f"images/tp{tp}_{best_k}ppv_maj_cm.png")
+    plt.close()
+    #plot_visualisation(knn_best, X_tr, y_tr, title=f"images/tp{tp}_{best_k}ppv_frontiere")
+    
+    pred_knn_imp = knn_best.predict(X_te, choice="impartial")
+    print(f'Accuracy {best_k}-PPV Unanimité : {accuracy(y_te, pred_knn_imp)}')
+    ConfusionMatrixDisplay.from_predictions(y_te, pred_knn_imp, cmap="Blues")
+    plt.title(f"TP{tp} - {best_k}-PPV Unanimite")
+    plt.savefig(f"images/tp{tp}_{best_k}ppv_imp_cm.png")
+    plt.close()
+
+
+    # --- 3. CLASSIFIEUR DE PARZEN ---
+    print("\n--- ESTIMATION DE PARZEN ---")
+
+    for kernel in ["uniforme", "gaussien"]:
+        best_h, best_acc = 0.1, 0
+        for h in [0.1, 0.5, 1.0, 1.5, 2.0, 3.0]:
+            _, acc = cross_validation(ParzenClassifier, X_tr, y_tr, n_folds=5, h=h, kernel=kernel)
+            if acc > best_acc:
+                best_acc, best_h = acc, h
+                
+        parzen = ParzenClassifier(h=best_h, kernel=kernel)
+        parzen.train(X_tr, y_tr)
+        pred_parzen = parzen.predict(X_te)
+        print(f'Accuracy Parzen {kernel} (h={best_h}) : {accuracy(y_te, pred_parzen)}')
+        ConfusionMatrixDisplay.from_predictions(y_te, pred_parzen, cmap="Blues")
+        plt.title(f"TP{tp} - Parzen {kernel} (h={best_h})")
+        plt.savefig(f"images/tp{tp}_parzen_{kernel}_cm.png")
+        plt.close()
+        #plot_visualisation(parzen, X_tr, y_tr, title=f"images/tp{tp}_parzen_{kernel}_frontiere")
+
+
+    # --- 4. PERCEPTRON ---
+    print("\n--- PERCEPTRON ---")
+
+    perc_ovo = Perceptron(strategy="one-vs-one", max_iter=1000)
+    perc_ovo.train(X_tr, y_tr)
+    pred_ovo = perc_ovo.predict(X_te)
+    print(f'Accuracy Perceptron OvO 5C : {accuracy(y_te, pred_ovo)}')
+    ConfusionMatrixDisplay.from_predictions(y_te, pred_ovo, cmap="Blues")
+    plt.title(f"TP{tp} - Perceptron OvO 5C")
+    plt.savefig(f"images/tp{tp}_perc_ovo_5c_cm.png")
+    plt.close()
+    
+    m_tr, m_te = (y_tr != 5.0), (y_te != 5.0)
+    X_tr_4c, y_tr_4c = X_tr[m_tr], y_tr[m_tr]
+    X_te_4c, y_te_4c = X_te[m_te], y_te[m_te]
+    
+    perc_ovo_4c = Perceptron(strategy="one-vs-one", max_iter=1000)
+    perc_ovo_4c.train(X_tr_4c, y_tr_4c)
+    pred_ovo_4c = perc_ovo_4c.predict(X_te_4c)
+    print(f'Accuracy Perceptron OvO 4C : {accuracy(y_te_4c, pred_ovo_4c)}')
+    ConfusionMatrixDisplay.from_predictions(y_te_4c, pred_ovo_4c, cmap="Blues")
+    plt.title(f"TP{tp} - Perceptron OvO 4C")
+    plt.savefig(f"images/tp{tp}_perc_ovo_4c_cm.png")
+    plt.close()
+    
+    perc_ova_4c = Perceptron(strategy="one-vs-all", max_iter=1000)
+    perc_ova_4c.train(X_tr_4c, y_tr_4c)
+    pred_ova_4c = perc_ova_4c.predict(X_te_4c)
+    print(f'Accuracy Perceptron OvA 4C : {accuracy(y_te_4c, pred_ova_4c)}')
+    ConfusionMatrixDisplay.from_predictions(y_te_4c, pred_ova_4c, cmap="Blues")
+    plt.title(f"TP{tp} - Perceptron OvA 4C")
+    plt.savefig(f"images/tp{tp}_perc_ova_4c_cm.png")
+    plt.close()
+
+
+    # --- 5. BAGGING ---
+    print("\n--- BAGGING ---")
+    best_n_perc, best_acc_perc = 5, 0
+    for n in [5, 10, 20, 30]:
+        _, acc = cross_validation(Bagging, X_tr, y_tr, n_folds=5, base_model_class=Perceptron, n_estimators=n, strategy="one-vs-one", max_iter=500)
+        if acc > best_acc_perc:
+            best_acc_perc, best_n_perc = acc, n
+            
+    bag_perc = Bagging(base_model_class=Perceptron, n_estimators=best_n_perc, strategy="one-vs-one", max_iter=500)
+    bag_perc.train(X_tr, y_tr)
+    pred_bag_perc = bag_perc.predict(X_te)
+    print(f'Accuracy Bagging Perceptron (N={best_n_perc}) : {accuracy(y_te, pred_bag_perc)}')
+    ConfusionMatrixDisplay.from_predictions(y_te, pred_bag_perc, cmap="Blues")
+    plt.title(f"TP{tp} - Bagging Perceptron (N={best_n_perc})")
+    plt.savefig(f"images/tp{tp}_bag_perc_cm.png")
+    plt.close()
+
+    best_n_knn, best_acc_knn = 5, 0
+    for n in [5, 10, 20, 30]:
+        _, acc = cross_validation(Bagging, X_tr, y_tr, n_folds=5, base_model_class=KNN, n_estimators=n, k=1)
+        if acc > best_acc_knn:
+            best_acc_knn, best_n_knn = acc, n
+            
+    bag_knn = Bagging(base_model_class=KNN, n_estimators=best_n_knn, k=1)
+    bag_knn.train(X_tr, y_tr)
+    pred_bag_knn = bag_knn.predict(X_te)
+    print(f'Accuracy Bagging KNN (N={best_n_knn}) : {accuracy(y_te, pred_bag_knn)}')
+    ConfusionMatrixDisplay.from_predictions(y_te, pred_bag_knn, cmap="Blues")
+    plt.title(f"TP{tp} - Bagging KNN (N={best_n_knn})")
+    plt.savefig(f"images/tp{tp}_bag_knn_cm.png")
+    plt.close()
