@@ -1,7 +1,13 @@
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import confusion_matrix
+from matplotlib.colors import ListedColormap
+
 
 def euclidean_distance(X, Y): 
     return np.sqrt(np.sum((X - Y)**2))
+
 
 def mahalanobis_distance(X, Y, cov, approx=True): 
     cov_inv = np.linalg.inv(cov)
@@ -13,6 +19,113 @@ def mahalanobis_distance(X, Y, cov, approx=True):
 
     return stat
 
+
+def accuracy(y_true, y_pred):
+    return np.mean(y_true == y_pred)
+
+
+def cross_validation(model_class, X, labels, n_folds=5, **model_params):
+    """
+    Effectue une validation croisée à n_folds sur un modèle donné.
+    
+    - base_model_class : La classe du modèle à évaluer (ex: Perceptron, KNN).
+    - X : Les features du jeu de données complet.
+    - labels : Les étiquettes du jeu de données complet.
+    - n_folds : Le nombre de sous-échantillons, Par défaut 5.
+    - model_params : Les hyperparamètres à passer au modèle.
+    
+    Retourne :
+    - accuracies : Un tableau numpy contenant la précision de chaque fold.
+    - mean_accuracy : La précision moyenne sur l'ensemble des fold.
+    """
+    
+    # Mélange aléatoire des données
+    n_samples = X.shape[0]
+    indices = np.random.permutation(n_samples)
+    X_shuffled = X[indices]
+    labels_shuffled = labels[indices]
+    
+    # n_folds
+    X_folds = np.array_split(X_shuffled, n_folds)
+    labels_folds = np.array_split(labels_shuffled, n_folds)
+    
+    accuracies = []
+    
+    # Apprentissage et de validation
+    for i in range(n_folds):
+        # Données test
+        X_test = X_folds[i]
+        labels_test = labels_folds[i]
+        
+        # Données d'entraînement 
+        X_train = np.vstack([X_folds[j] for j in range(n_folds) if j != i])
+        labels_train = np.concatenate([labels_folds[j] for j in range(n_folds) if j != i])
+        
+        # Instanciation du modèle avec ses paramètres spécifiques
+        modele = model_class(**model_params)
+        
+        # Entraînement sur le set d'entraînement
+        modele.train(X_train, labels_train)
+        
+        # Prédiction sur le set de test
+        predictions = modele.predict(X_test)
+        
+        # Evaluation 
+        fold_acc = accuracy(labels_test, predictions)
+        accuracies.append(fold_acc)
+        
+    accuracies = np.array(accuracies)
+    mean_accuracy = np.mean(accuracies)
+    
+    return accuracies, mean_accuracy
+
+def plot_visualisation(model, X_train, labels_train, X_new=None, title="Visualisation"):
+    plt.figure(figsize=(9, 6))
+
+    # couleurs 
+    classes = np.unique(labels_train)
+    n_classes = len(classes)
+    cmap_base = plt.get_cmap('Set1')
+    colors = [cmap_base(i) for i in range(n_classes)]
+    custom_cmap = ListedColormap(colors)
+    class_to_idx = {c: i for i, c in enumerate(classes)}
+
+    # Grille de prédiction
+    x_min, x_max = X_train[:, 0].min() - 1, X_train[:, 0].max() + 1
+    y_min, y_max = X_train[:, 1].min() - 1, X_train[:, 1].max() + 1
+    xx, yy = np.meshgrid(np.linspace(x_min, x_max, 300),
+                         np.linspace(y_min, y_max, 300))
+    grille_points = np.c_[xx.ravel(), yy.ravel()]
+    Z = model.predict(grille_points)
+    Z = np.array(Z).reshape(xx.shape)
+    Z_indices = np.vectorize(class_to_idx.get)(Z)
+    bornes = np.arange(n_classes + 1) - 0.5
+    plt.contourf(xx, yy, Z_indices, alpha=0.3, cmap=custom_cmap, levels=bornes)
+    plt.contour(xx, yy, Z_indices, colors='black', linewidths=0.5, alpha=0.7, levels=bornes)
+
+    # Points d'entraînement
+    for i, c in enumerate(classes):
+        data_class = (labels_train == c)
+        plt.scatter(X_train[data_class, 0], X_train[data_class, 1], 
+                    color=custom_cmap(i), edgecolors='black', label=f'Classe {int(c)}', alpha=0.8)
+
+    # Barycentres (si le modèle en possède)
+    if hasattr(model, 'barycentres'):
+        for c, mu in model.barycentres.items():
+            if c in class_to_idx: 
+                color_idx = class_to_idx[c]
+                plt.scatter(mu[0], mu[1], c=[custom_cmap(color_idx)], s=300, edgecolors='black', 
+                            label=f'Barycentre {int(c)}' if c == classes[0] else "")
+
+    plt.title(title, fontweight='bold', pad=15)
+    plt.xlabel('Caractéristique 1')
+    plt.ylabel('Caractéristique 2')
+    plt.legend(loc='upper left', bbox_to_anchor=(1.05, 1))
+    plt.tight_layout()
+    plt.savefig(title + ".png")
+    plt.close()
+    
+    
 class GaussianClassifier:
     def __init__(self, metric="euclidienne"):
         """
@@ -69,7 +182,6 @@ class GaussianClassifier:
         elif self.metric == "log-vraisemblance":
             return mahalanobis_distance(x, mu, self.cov[c], False)
 
-
     def predict(self, P):
         """
         Prédit la classe pour un ou plusieurs points.
@@ -91,9 +203,15 @@ class GaussianClassifier:
             T.append(predict_class)
             
         return np.array(T)
+
     
+
 class KNN: 
     def __init__(self, k=1):
+        """
+        Initialise le classifieur KNN.
+        - k : Nombre de voisins (hyperparamètre, doit être > 0)
+        """
         if k <= 0:
             raise ValueError("k doit etre un entier positif.")
         self.k = k
@@ -113,8 +231,8 @@ class KNN:
         """
         Prédit une classe pour un tableau de points P.
         """
-        if choice not in ["majority", "impartiel"]:
-            raise ValueError("choice doit être 'majority' ou 'impartiel'.")
+        if choice not in ["majority", "impartial"]:
+            raise ValueError("choice doit être 'majority' ou 'impartial'.")
         
         # cas ou P est un point unique 
         if P.ndim == 1:
@@ -135,9 +253,10 @@ class KNN:
                 index_gagnant = np.argmax(occurrences)
                 predictions.append(unique_labels[index_gagnant])
                 
-            elif choice == 'impartiel':
+            elif choice == 'impartial':
                 unique_labels = np.unique(labels_k_proches)
-                predictions.append(unique_labels[0] if len(unique_labels) == 1 else None)
+                # -1 classe de rejet
+                predictions.append(unique_labels[0] if len(unique_labels) == 1 else -1.0)
                 
         return np.array(predictions)
         
@@ -181,8 +300,8 @@ class ParzenClassifier:
             return np.exp(-0.5 * (u ** 2))
             
         elif self.kernel == "uniforme":
-            # Uniforme : 1 si u <= 1 (à l'intérieur de la fenêtre), sinon 0
-            return 1.0 if u >= 1 else 0 
+            # Uniforme : 1.0 si u <= 1 (à l'intérieur de la fenêtre), sinon 0.0
+            return np.where(u <= 1, 1.0, 0.0)
 
     def predict(self, P):
         """
@@ -212,6 +331,7 @@ class ParzenClassifier:
             predictions.append(predict_class)
             
         return np.array(predictions)
+
     
 class Perceptron:
     def __init__(self, strategy="one-vs-one", max_iter=1000, lr=0.1):
@@ -234,8 +354,8 @@ class Perceptron:
 
     def train_lr(self, X_transformed, y):
         """
-        Apprentissage: Déterminer un hyperplan en utilisant la transformation normalisée.
-        X_transformed contient déjà la composante (x, 1).
+        Apprentissage: Déterminer un hyperplan en utilisant la transformation.
+        X_transformed déjà sous forme (x, 1).
         """
         nb_individus, nb_features = X_transformed.shape
         
@@ -346,3 +466,83 @@ class Perceptron:
                 predictions.append(predict_class)
 
         return np.array(predictions)
+    
+    
+class Bagging:
+    def __init__(self, base_model_class, n_estimators=10, **model_params):
+        """
+        Initialise l'algorithme de Bagging.
+        - base_model_class : La classe du modèle (ex: Perceptron, KNN).
+        - n_estimators : Le nombre de classifieurs à entraîner dans l'ensemble.
+        - model_params : Dictionnaire des hyperparamètres à passer au modèle de base.
+        """
+        if n_estimators <= 0:
+            raise ValueError("Le nombre d'estimateurs doit être un entier positif.")
+            
+        self.base_model_class = base_model_class
+        self.n_estimators = n_estimators
+        self.model_params = model_params
+        
+        # Liste pour stocker les modèles entraînés
+        self.estimators = [] 
+        self.classes = None
+
+    def train(self, X, labels):
+        """
+        Entraîne l'ensemble des modèles sur des échantillons Bootstrap.
+        - X: Les features (ex: colonnes 1 et 2)
+        - labels: Les labels (ex: colonne 0)
+        """
+        self.classes = np.unique(labels)
+        n_samples = X.shape[0]
+        
+        # Réinitialise la liste si le modèle est réentraîné
+        self.estimators = []
+        
+        # Entraînement des n_estimators modèles
+        for _ in range(self.n_estimators):
+            # Tirage aléatoire avec remise
+            indices_bootstrap = np.random.choice(n_samples, size=n_samples, replace=True)
+            X_bootstrap = X[indices_bootstrap]
+            labels_bootstrap = labels[indices_bootstrap]
+            
+            # Instanciation d'un nouveau modèle de base avec ses paramètres
+            modele = self.base_model_class(**self.model_params)
+            
+            # Entraînement sur l'échantillon Bootstrap
+            modele.train(X_bootstrap, labels_bootstrap)
+            
+            # Ajout à l'ensemble
+            self.estimators.append(modele)
+
+    def predict(self, P):
+        """
+        Prédit la classe pour un ou plusieurs points par vote majoritaire.
+        - P: Tableau de points à prédire
+        """
+        # cas ou P est un point unique 
+        if P.ndim == 1:
+            P = P.reshape(1, -1)
+            
+        # Matrice pour stocker les prédictions de chaque modèle (n_estimators x n_points)
+        toutes_predictions = np.zeros((self.n_estimators, P.shape[0]))
+        
+        for i, modele in enumerate(self.estimators):
+            toutes_predictions[i] = modele.predict(P)
+            
+        predictions_finales = []
+        
+        # Vote majoritaire pour chaque point
+        for j in range(P.shape[0]):
+            # Récupère la colonne j correspondant aux votes des n_estimators pour le point j
+            votes = toutes_predictions[:, j]
+            
+            # Compte les occurrences de chaque classe prédite
+            unique_classes, occurrences = np.unique(votes, return_counts=True)
+            
+            # Détermine la classe gagnante
+            index_gagnant = np.argmax(occurrences)
+            predictions_finales.append(unique_classes[index_gagnant])
+            
+        return np.array(predictions_finales)
+
