@@ -1,7 +1,5 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
-from sklearn.metrics import confusion_matrix
 from matplotlib.colors import ListedColormap
 
 
@@ -51,7 +49,7 @@ def cross_validation(model_class, X, labels, n_folds=5, **model_params):
     
     accuracies = []
     
-    # Apprentissage et de validation
+    # Apprentissage et validation
     for i in range(n_folds):
         # Données test
         X_test = X_folds[i]
@@ -80,6 +78,9 @@ def cross_validation(model_class, X, labels, n_folds=5, **model_params):
     return accuracies, mean_accuracy
 
 def plot_visualisation(model, X_train, labels_train, X_new=None, title="Visualisation"):
+    """
+    Visualise les zones de décision d'un modèle.
+    """
     plt.figure(figsize=(9, 6))
 
     # couleurs 
@@ -121,6 +122,40 @@ def plot_visualisation(model, X_train, labels_train, X_new=None, title="Visualis
     plt.xlabel('Caractéristique 1')
     plt.ylabel('Caractéristique 2')
     plt.legend(loc='upper left', bbox_to_anchor=(1.05, 1))
+    plt.tight_layout()
+    plt.savefig(title + ".png")
+    plt.close()
+
+
+def plot_perceptron_decision(model, X_train, labels_train, title="Perceptron Decision"):
+    """
+    Visualise les droites de décision du Perceptron.
+    """
+    plt.figure(figsize=(9, 6))
+    
+    # Points
+    classes = np.unique(labels_train)
+    for c in classes:
+        plt.scatter(X_train[labels_train == c, 0], X_train[labels_train == c, 1], label=f'Classe {int(c)}')
+
+    # Droites
+    x_range = np.array([X_train[:, 0].min() - 1, X_train[:, 0].max() + 1])
+    
+    for key, W in model.weights.items():
+        # W est de la forme [w1, w2, w0] (car X était (x, 1))
+        # Equation : w1*x1 + w2*x2 + w0 = 0  => x2 = -(w1*x1 + w0) / w2
+        w1, w2, w0 = W
+        if abs(w2) > 1e-5:  # Évite la division par zéro
+            y_range = -(w1 * x_range + w0) / w2
+            y_range = np.clip(y_range, -50, 50) 
+            label_name = f"Frontière {key}"
+            plt.plot(x_range, y_range, "--", label=label_name)
+
+    plt.title(title)
+    plt.xlabel('Caractéristique 1')
+    plt.ylabel('Caractéristique 2')
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.grid(True, alpha=0.3)
     plt.tight_layout()
     plt.savefig(title + ".png")
     plt.close()
@@ -436,6 +471,7 @@ class Perceptron:
     def predict(self, P):
         """
         Décision : positionnement du point inconnu par rapport aux surfaces.
+        Zone de non-classe prise en compte si ambiguïté géométrique.
         """
         if P.ndim == 1:
             P = P.reshape(1, -1)
@@ -455,15 +491,32 @@ class Perceptron:
                         votes[c1] += 1
                     else:
                         votes[c2] += 1
-                        
-                predict_class = max(votes, key=votes.get)
-                predictions.append(predict_class)
+                
+                # Trouver le nombre maximal de votes obtenus
+                max_votes = max(votes.values())
+                
+                # Compter combien de classes ont obtenu ce maximum
+                classes_gagnantes = [c for c, v in votes.items() if v == max_votes]
+                
+                # Si conflit de vote (ex aequo), le point tombe dans la zone d'incertitude
+                if len(classes_gagnantes) > 1:
+                    predictions.append(-1)
+                else:
+                    predictions.append(classes_gagnantes[0])
 
             elif self.strategy == "one-vs-all":
-                # Le point est assigné à la classe dont la fonction de décision est la plus grande
+                # Vérifier le signe strict de chaque hyperplan (a_i * x_i + a_0 > 0)
                 scores = {c: np.dot(W, p) for c, W in self.weights.items()}
-                predict_class = max(scores, key=scores.get)
-                predictions.append(predict_class)
+                
+                # Une classe est validée si son hyperplan associé répond positivement
+                classes_positives = [c for c, score in scores.items() if score > 0]
+                
+                # Le point est assigné uniquement si une seule classe l'accepte
+                # Si aucune classe ne veut du point, ou si plusieurs le revendiquent -> non classable
+                if len(classes_positives) == 1:
+                    predictions.append(classes_positives[0])
+                else:
+                    predictions.append(-1)
 
         return np.array(predictions)
     

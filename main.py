@@ -3,10 +3,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.metrics import ConfusionMatrixDisplay
-from fonction import GaussianClassifier, KNN, ParzenClassifier, Perceptron, Bagging, cross_validation, plot_visualisation, accuracy
-
+from fonction import GaussianClassifier, KNN, ParzenClassifier, Perceptron, Bagging, cross_validation, plot_visualisation, accuracy, plot_perceptron_decision
+    
 os.makedirs("images", exist_ok=True)
 
+#%%
 # Data 
 datasets = {}
 for tp in [1, 2, 3]:
@@ -17,7 +18,7 @@ for tp in [1, 2, 3]:
         'X_test': pred[:, 1:3], 'y_test': pred[:, 0]
     }
 
-
+#%%
 for tp, data in datasets.items():
     print(f"\n{'='*50}\nTRAITEMENT DU TP{tp}\n{'='*50}")
     X_tr, y_tr = data['X_train'], data['y_train']
@@ -131,7 +132,7 @@ for tp, data in datasets.items():
         plt.savefig(f"images/tp{tp}_parzen_{kernel}_cm.png")
         plt.close()
         #plot_visualisation(parzen, X_tr, y_tr, title=f"images/tp{tp}_parzen_{kernel}_frontiere")
-
+    
 
     # --- 4. PERCEPTRON ---
     print("\n--- PERCEPTRON ---")
@@ -149,8 +150,11 @@ for tp, data in datasets.items():
     X_tr_4c, y_tr_4c = X_tr[m_tr], y_tr[m_tr]
     X_te_4c, y_te_4c = X_te[m_te], y_te[m_te]
     
+    # 4C - OvO
     perc_ovo_4c = Perceptron(strategy="one-vs-one", max_iter=1000)
     perc_ovo_4c.train(X_tr_4c, y_tr_4c)
+    #plot_perceptron_decision(perc_ovo_4c, X_tr_4c, y_tr_4c, title=f"images/tp{tp}_perc_ovo_4c_frontiere")
+    
     pred_ovo_4c = perc_ovo_4c.predict(X_te_4c)
     print(f'Accuracy Perceptron OvO 4C : {accuracy(y_te_4c, pred_ovo_4c)}')
     ConfusionMatrixDisplay.from_predictions(y_te_4c, pred_ovo_4c, cmap="Blues")
@@ -158,8 +162,11 @@ for tp, data in datasets.items():
     plt.savefig(f"images/tp{tp}_perc_ovo_4c_cm.png")
     plt.close()
     
+    # 4C - OvA
     perc_ova_4c = Perceptron(strategy="one-vs-all", max_iter=1000)
     perc_ova_4c.train(X_tr_4c, y_tr_4c)
+    plot_perceptron_decision(perc_ova_4c, X_tr_4c, y_tr_4c, title=f"images/tp{tp}_perc_ova_4c_frontiere")
+    
     pred_ova_4c = perc_ova_4c.predict(X_te_4c)
     print(f'Accuracy Perceptron OvA 4C : {accuracy(y_te_4c, pred_ova_4c)}')
     ConfusionMatrixDisplay.from_predictions(y_te_4c, pred_ova_4c, cmap="Blues")
