@@ -23,7 +23,7 @@ for tp, data in datasets.items():
     print(f"\n{'='*50}\nTRAITEMENT DU TP{tp}\n{'='*50}")
     X_tr, y_tr = data['X_train'], data['y_train']
     X_te, y_te = data['X_test'], data['y_test']
-
+    
     # --- 0. ANALYSES DESCRIPTIVES ---
     print(f"\n--- STATISTIQUES DESCRIPTIVES TP{tp} ---")
     plt.figure(figsize=(8, 6))
@@ -112,7 +112,7 @@ for tp, data in datasets.items():
     plt.savefig(f"images/tp{tp}_{best_k}ppv_imp_cm.png")
     plt.close()
 
-
+    
     # --- 3. CLASSIFIEUR DE PARZEN ---
     print("\n--- ESTIMATION DE PARZEN ---")
 
@@ -133,28 +133,36 @@ for tp, data in datasets.items():
         plt.close()
         #plot_visualisation(parzen, X_tr, y_tr, title=f"images/tp{tp}_parzen_{kernel}_frontiere")
     
-
+    
     # --- 4. PERCEPTRON ---
     print("\n--- PERCEPTRON ---")
 
-    perc_ovo = Perceptron(strategy="one-vs-one", max_iter=1000)
-    perc_ovo.train(X_tr, y_tr)
-    pred_ovo = perc_ovo.predict(X_te)
-    print(f'Accuracy Perceptron OvO 5C : {accuracy(y_te, pred_ovo)}')
-    ConfusionMatrixDisplay.from_predictions(y_te, pred_ovo, cmap="Blues")
+    if tp == 1:
+        classe_centrale = 5.0
+    elif tp == 2:
+        classe_centrale = 3.0  
+    elif tp == 3:
+        classe_centrale = 1.0
+
+
+    # 5C - OvO (Concerne les 5 classes, s'arrête via max_iter si non séparable)
+    perc_ovo_5c = Perceptron(strategy="one-vs-one", max_iter=1000)
+    perc_ovo_5c.train(X_tr, y_tr)
+    pred_ovo_5c = perc_ovo_5c.predict(X_te)
+    print(f'Accuracy Perceptron OvO 5C : {accuracy(y_te, pred_ovo_5c)}')
+    ConfusionMatrixDisplay.from_predictions(y_te, pred_ovo_5c, cmap="Blues")
     plt.title(f"TP{tp} - Perceptron OvO 5C")
     plt.savefig(f"images/tp{tp}_perc_ovo_5c_cm.png")
     plt.close()
     
-    m_tr, m_te = (y_tr != 5.0), (y_te != 5.0)
+    # Suppression de la classe centrale 
+    m_tr, m_te = (y_tr != classe_centrale), (y_te != classe_centrale)
     X_tr_4c, y_tr_4c = X_tr[m_tr], y_tr[m_tr]
     X_te_4c, y_te_4c = X_te[m_te], y_te[m_te]
     
-    # 4C - OvO
+    # 4C - OvO (Pour comparer équitablement avec le OvA sur 4 classes)
     perc_ovo_4c = Perceptron(strategy="one-vs-one", max_iter=1000)
     perc_ovo_4c.train(X_tr_4c, y_tr_4c)
-    #plot_perceptron_decision(perc_ovo_4c, X_tr_4c, y_tr_4c, title=f"images/tp{tp}_perc_ovo_4c_frontiere")
-    
     pred_ovo_4c = perc_ovo_4c.predict(X_te_4c)
     print(f'Accuracy Perceptron OvO 4C : {accuracy(y_te_4c, pred_ovo_4c)}')
     ConfusionMatrixDisplay.from_predictions(y_te_4c, pred_ovo_4c, cmap="Blues")
@@ -162,7 +170,7 @@ for tp, data in datasets.items():
     plt.savefig(f"images/tp{tp}_perc_ovo_4c_cm.png")
     plt.close()
     
-    # 4C - OvA
+    # 4C - OvA (Séparer une classe de toutes les autres)
     perc_ova_4c = Perceptron(strategy="one-vs-all", max_iter=1000)
     perc_ova_4c.train(X_tr_4c, y_tr_4c)
     plot_perceptron_decision(perc_ova_4c, X_tr_4c, y_tr_4c, title=f"images/tp{tp}_perc_ova_4c_frontiere")
